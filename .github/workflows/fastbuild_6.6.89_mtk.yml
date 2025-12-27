@@ -67,7 +67,7 @@ on:
         default: false
 
       adios_enable:
-        description: '是否启用ADIOS IO调度器'
+        description: '是否启用ADIOS IO调度器支持'
         required: true
         type: boolean
         default: true
