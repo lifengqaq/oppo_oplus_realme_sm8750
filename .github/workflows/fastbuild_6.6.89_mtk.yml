@@ -548,6 +548,7 @@ jobs:
           set_y CONFIG_CGROUP_NET_PRIO
 
           set_y CONFIG_DEVTMPFS
+          set_y CONFIG_DEVTMPFS_MOUNT
           set_y CONFIG_OVERLAY_FS
 
           # Optional hw-access related support from official docs
