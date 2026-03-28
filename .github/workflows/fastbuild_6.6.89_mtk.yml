@@ -60,6 +60,11 @@ on:
         required: true
         type: boolean
         default: 'false'
+      droidspaces_enable:
+        description: '是否启用 Droidspaces 支持(Host/None，不含 UFW/Fail2ban；含 optional F2FS overlay2 补丁)'
+        required: true
+        type: boolean
+        default: 'false'
       adios_enable:
         description: '是否启用ADIOS IO调度器支持(提升IO读写性能)'
         required: true
@@ -76,10 +81,7 @@ on:
         type: boolean
         default: 'true'
       ccache_update:
-        description: '更新ccache缓存(将本次编译生成的ccache缓存覆盖至仓库缓存，在更改编译配置、源码或需要刷新缓存时开启)'
-        required: true
-        type: boolean
-        default: 'false'
+        description: '更新ccache缓存(将本次编译生成的ccache缓存覆盖至仓库缓存，在更改编译配置、源码或需要刷新缓存时开启false'
       ccache_debug:
         description: '是否上传 Ccache调试日志(用于调试, 无需要不必开启)'
         required: true
@@ -267,7 +269,7 @@ jobs:
             curl -LSs "https://raw.githubusercontent.com/pershoot/KernelSU-Next/refs/heads/dev-susfs/kernel/setup.sh" | bash -s dev-susfs
             cd KernelSU-Next
             rm -rf .git
-            KSU_VERSION=$(expr $(curl -sI "https://api.github.com/repos/pershoot/KernelSU-Next/commits?sha=dev&per_page=1" | grep -i "link:" | sed -n 's/.*page=$$[0-9]*$$>; rel="last".*/\1/p') "+" 30000)
+            KSU_VERSION=$(expr $(curl -sI "https://api.github.com/repos/pershoot/KernelSU-Next/commits?sha=dev&per_page=1" | grep -i "link:" | sed -n 's/.*page=\([0-9]*\)>; rel="last".*/\1/p') "+" 30000)
             echo "KSUVER=$KSU_VERSION" >> $GITHUB_ENV
             echo "ksuver=$KSU_VERSION" >> $GITHUB_OUTPUT
             sed -i "s/KSU_VERSION_FALLBACK := 1/KSU_VERSION_FALLBACK := $KSU_VERSION/g" kernel/Kbuild
@@ -280,7 +282,7 @@ jobs:
             echo "正在配置原版 KernelSU (tiann/KernelSU)..."
             curl -LSs "https://raw.githubusercontent.com/tiann/KernelSU/refs/heads/main/kernel/setup.sh" | bash -s main
             cd ./KernelSU
-            KSU_VERSION=$(expr $(curl -sI "https://api.github.com/repos/tiann/KernelSU/commits?sha=main&per_page=1" | grep -i "link:" | sed -n 's/.*page=$$[0-9]*$$>; rel="last".*/\1/p') "+" 30000)
+            KSU_VERSION=$(expr $(curl -sI "https://api.github.com/repos/tiann/KernelSU/commits?sha=main&per_page=1" | grep -i "link:" | sed -n 's/.*page=\([0-9]*\)>; rel="last".*/\1/p') "+" 30000)
             echo "KSUVER=$KSU_VERSION" >> $GITHUB_ENV
             echo "ksuver=$KSU_VERSION" >> $GITHUB_OUTPUT
             sed -i "s/DKSU_VERSION=16/DKSU_VERSION=${KSU_VERSION}/" kernel/Kbuild
@@ -483,74 +485,83 @@ jobs:
           sed -i 's/${scm_version}//' ./common/scripts/setlocalversion
           echo "CONFIG_LOCALVERSION_AUTO=n" >> ./common/arch/arm64/configs/gki_defconfig
 
-      # ============ 以下两步为新增的 Droidspaces 支持 ============
-
-      - name: 应用 Droidspaces GKI 补丁
-        run: |
-          cd kernel_workspace/common
-
-          echo "正在下载 Droidspaces GKI 补丁（适用于 6.1+ 内核）..."
-
-          # 补丁1: 禁用 LKM 的 CRC 校验（防止 vendor 模块因 ABI 变更拒绝加载）
-          wget -q "https://github.com/ravindu644/Droidspaces-OSS/raw/main/Documentation/resources/kernel-patches/GKI/01.6.1%2B_disable_crc_checks_for_lkms.patch" \
-            -O patch_01_disable_crc.patch
-
-          # 补丁2: 修复 cgroup 文件前缀处理
-          wget -q "https://github.com/ravindu644/Droidspaces-OSS/raw/main/Documentation/resources/kernel-patches/GKI/02.fix_restore%20cgroup%20file%20prefix%20handling%20.patch" \
-            -O patch_02_cgroup_prefix.patch
-
-          # 补丁3: 为 posix_mqueue 使用 Android ABI 填充（适用于 5.15+ 内核）
-          wget -q "https://github.com/ravindu644/Droidspaces-OSS/raw/main/Documentation/resources/kernel-patches/GKI/03.5.15%2B_use_android_abi_padding_for_posix_mqueue.patch" \
-            -O patch_03_posix_mqueue.patch
-
-          # 补丁4: 为 sysvipc task_struct 使用 Android ABI 填充
-          wget -q "https://github.com/ravindu644/Droidspaces-OSS/raw/main/Documentation/resources/kernel-patches/GKI/04.use_android_abi_padding_for_sysvipc_task_struct.patch" \
-            -O patch_04_sysvipc.patch
-
-          echo "正在应用补丁..."
-          patch -p1 < patch_01_disable_crc.patch || true
-          patch -p1 < patch_02_cgroup_prefix.patch || true
-          patch -p1 < patch_03_posix_mqueue.patch || true
-          patch -p1 < patch_04_sysvipc.patch || true
-
-          echo "Droidspaces GKI 补丁应用完成！"
-          echo "已应用的补丁："
-          ls -la patch_0*.patch
-
-      - name: 添加 Droidspaces 内核配置
+      - name: 应用 Droidspaces 补丁并添加配置
+        if: inputs.droidspaces_enable
         run: |
           cd kernel_workspace
+          rm -rf droidspaces-oss
+          git clone --depth=1 https://github.com/ravindu644/Droidspaces-OSS.git droidspaces-oss
+
+          cd common
+          GKI_PATCH_DIR="../droidspaces-oss/Documentation/resources/kernel-patches/GKI"
+          OPT_PATCH_DIR="../droidspaces-oss/Documentation/resources/kernel-patches/optional"
+
+          echo "正在应用 Droidspaces 4 个 GKI 必需补丁..."
+          patch -p1 < "$GKI_PATCH_DIR/01.6.1+_disable_crc_checks_for_lkms.patch"
+          patch -p1 < "$GKI_PATCH_DIR/02.fix_restore cgroup file prefix handling .patch"
+          patch -p1 < "$GKI_PATCH_DIR/03.5.15+_use_android_abi_padding_for_posix_mqueue.patch"
+          patch -p1 < "$GKI_PATCH_DIR/04.use_android_abi_padding_for_sysvipc_task_struct.patch"
+
+          echo "正在应用 Droidspaces optional 补丁: fix-docker-overlay2-on-f2fs.patch"
+          patch -p1 < "$OPT_PATCH_DIR/fix-docker-overlay2-on-f2fs.patch"
+
+          cd ..
           DEFCONFIG=./common/arch/arm64/configs/gki_defconfig
 
-          echo "正在添加 Droidspaces 必需的内核配置..."
+          set_y() {
+            local key="$1"
+            if grep -q "^# ${key} is not set$" "$DEFCONFIG"; then
+              sed -i "s/^# ${key} is not set$/${key}=y/" "$DEFCONFIG"
+            elif grep -q "^${key}=.*" "$DEFCONFIG"; then
+              sed -i "s/^${key}=.*/${key}=y/" "$DEFCONFIG"
+            else
+              echo "${key}=y" >> "$DEFCONFIG"
+            fi
+          }
 
-          # System V IPC（容器内工具依赖，启用后会改变内核数据结构，必须配合 GKI 补丁）
-          echo "CONFIG_SYSVIPC=y" >> $DEFCONFIG
+          echo "正在添加 Droidspaces 所需内核配置（按官方当前 main 分支文档）..."
 
-          # POSIX 消息队列（容器内 init 系统和服务需要）
-          echo "CONFIG_POSIX_MQUEUE=y" >> $DEFCONFIG
+          # Required core configs
+          set_y CONFIG_SYSCTL
+          set_y CONFIG_SYSVIPC
+          set_y CONFIG_POSIX_MQUEUE
 
-          # PID 命名空间（容器隔离核心，当前 defconfig 中被禁用）
-          echo "CONFIG_PID_NS=y" >> $DEFCONFIG
+          set_y CONFIG_NAMESPACES
+          set_y CONFIG_PID_NS
+          set_y CONFIG_UTS_NS
+          set_y CONFIG_IPC_NS
+          set_y CONFIG_USER_NS
 
-          echo "Droidspaces 配置添加完成！"
-          echo "已添加的配置项："
-          grep -E "CONFIG_SYSVIPC|CONFIG_POSIX_MQUEUE|CONFIG_PID_NS" $DEFCONFIG
+          set_y CONFIG_SECCOMP
+          set_y CONFIG_SECCOMP_FILTER
 
-          echo ""
-          echo "验证 gki_defconfig 中 Droidspaces 相关的全部配置："
-          echo "--- 命名空间 ---"
-          grep -E "CONFIG_NAMESPACES|CONFIG_PID_NS|CONFIG_UTS_NS|CONFIG_IPC_NS|CONFIG_NET_NS" $DEFCONFIG || echo "(部分未找到)"
-          echo "--- Cgroups ---"
-          grep -E "CONFIG_CGROUPS|CONFIG_CGROUP_DEVICE|CONFIG_CGROUP_FREEZER|CONFIG_MEMCG" $DEFCONFIG || echo "(部分未找到)"
-          echo "--- Seccomp ---"
-          grep "CONFIG_SECCOMP" $DEFCONFIG || echo "(未找到)"
-          echo "--- 文件系统 ---"
-          grep -E "CONFIG_OVERLAY_FS|CONFIG_DEVTMPFS" $DEFCONFIG || echo "(部分未找到)"
-          echo "--- IPC ---"
-          grep -E "CONFIG_SYSVIPC|CONFIG_POSIX_MQUEUE" $DEFCONFIG || echo "(部分未找到)"
+          set_y CONFIG_CGROUPS
+          set_y CONFIG_CGROUP_DEVICE
+          set_y CONFIG_CGROUP_PIDS
+          set_y CONFIG_MEMCG
+          set_y CONFIG_CGROUP_SCHED
+          set_y CONFIG_FAIR_GROUP_SCHED
+          set_y CONFIG_CGROUP_FREEZER
+          set_y CONFIG_CGROUP_NET_PRIO
 
-      # ============ 以上两步为新增的 Droidspaces 支持 ============
+          set_y CONFIG_DEVTMPFS
+          set_y CONFIG_OVERLAY_FS
+
+          # Optional hw-access related support from official docs
+          set_y CONFIG_FW_LOADER
+          set_y CONFIG_FW_LOADER_USER_HELPER
+          set_y CONFIG_FW_LOADER_COMPRESS
+
+          # Host/None only: None 模式关键是 NET_NS
+          set_y CONFIG_NET_NS
+
+          # 已有则保持；没有则补齐，避免将来上游 defconfig 变动
+          set_y CONFIG_VETH
+          set_y CONFIG_BRIDGE
+
+          echo "Droidspaces 配置添加完成"
+          echo "当前 defconfig 关键项如下："
+          grep -E 'CONFIG_(SYSCTL|SYSVIPC|POSIX_MQUEUE|NAMESPACES|PID_NS|UTS_NS|IPC_NS|USER_NS|SECCOMP|SECCOMP_FILTER|CGROUPS|CGROUP_DEVICE|CGROUP_PIDS|MEMCG|CGROUP_SCHED|FAIR_GROUP_SCHED|CGROUP_FREEZER|CGROUP_NET_PRIO|DEVTMPFS|OVERLAY_FS|FW_LOADER|FW_LOADER_USER_HELPER|FW_LOADER_COMPRESS|NET_NS|VETH|BRIDGE)=' "$DEFCONFIG" || true
 
       - name: 构建内核
         run: |
@@ -585,11 +596,13 @@ jobs:
           echo "FAKETIME=$FAKETIME" >> $GITHUB_ENV
           SO_DIR=$(pwd)
           export PRELOAD_LIBS="$SO_DIR/libfakestat.so $SO_DIR/libfaketimeMT.so"
+
           echo '#!/bin/bash' > cc-wrapper
           echo 'export LD_PRELOAD="'$PRELOAD_LIBS'"' >> cc-wrapper
           echo 'export FAKESTAT="'$FAKESTAT'"' >> cc-wrapper
           echo 'export FAKETIME="'$FAKETIME'"' >> cc-wrapper
           echo 'ccache clang "$@"' >> cc-wrapper
+
           echo '#!/bin/bash' > ld-wrapper
           echo 'export LD_PRELOAD="'$PRELOAD_LIBS'"' >> ld-wrapper
           echo 'export FAKESTAT="'$FAKESTAT'"' >> ld-wrapper
@@ -604,11 +617,13 @@ jobs:
           echo 'echo ">>> Wrapper 内部环境检查完毕."' >> test-wrapper.sh
           echo 'exec "$@"' >> test-wrapper.sh
           chmod +x test-wrapper.sh
+
           echo "--- [Wrapper Test] 正在测试 (date) 命令 ---"
           ./test-wrapper.sh date
           echo "--- [Wrapper Test] 正在测试 (stat) 命令 ---"
           ./test-wrapper.sh stat ./Makefile
           echo "--- [Wrapper Test] 测试完毕 ---"
+
           chmod +x cc-wrapper ld-wrapper
           echo "--- 编译前环境时间: $(LD_PRELOAD=$PRELOAD_LIBS date) ---"
           echo "--- 编译前环境文件时间戳: ---"
@@ -618,7 +633,38 @@ jobs:
           sudo rm -rf /usr/local/lib/android &
           sudo rm -rf /opt/ghc &
           sudo rm -rf /opt/hostedtoolcache/CodeQL &
-          make -j$(nproc --all) LLVM=1 ARCH=arm64 CROSS_COMPILE=aarch64-linux-gnu- CC="ccache clang" LD="ld.lld" HOSTLD=ld.lld O=out KCFLAGS+=-O2 KCFLAGS+=-Wno-error gki_defconfig &&
+
+          make -j$(nproc --all) LLVM=1 ARCH=arm64 CROSS_COMPILE=aarch64-linux-gnu- CC="ccache clang" LD="ld.lld" HOSTLD=ld.lld O=out KCFLAGS+=-O2 KCFLAGS+=-Wno-error gki_defconfig
+
+          if [[ "${{ github.event.inputs.droidspaces_enable }}" == "true" ]]; then
+            echo "正在验证 Droidspaces 最终 out/.config 关键项..."
+
+            check_conf() {
+              local key="$1"
+              grep -q "^${key}=y$" out/.config || { echo "缺少配置: ${key}"; exit 1; }
+            }
+
+            check_conf CONFIG_SYSCTL
+            check_conf CONFIG_SYSVIPC
+            check_conf CONFIG_POSIX_MQUEUE
+            check_conf CONFIG_NAMESPACES
+            check_conf CONFIG_PID_NS
+            check_conf CONFIG_UTS_NS
+            check_conf CONFIG_IPC_NS
+            check_conf CONFIG_USER_NS
+            check_conf CONFIG_SECCOMP
+            check_conf CONFIG_SECCOMP_FILTER
+            check_conf CONFIG_CGROUPS
+            check_conf CONFIG_CGROUP_DEVICE
+            check_conf CONFIG_CGROUP_PIDS
+            check_conf CONFIG_MEMCG
+            check_conf CONFIG_DEVTMPFS
+            check_conf CONFIG_OVERLAY_FS
+            check_conf CONFIG_NET_NS
+
+            echo "Droidspaces 关键配置验证通过"
+          fi
+
           make -j$(nproc --all) LLVM=1 ARCH=arm64 CROSS_COMPILE=aarch64-linux-gnu- CC="$(pwd)/cc-wrapper" LD="$(pwd)/ld-wrapper" HOSTLD=ld.lld O=out KCFLAGS+=-O2 KCFLAGS+=-Wno-error Image
 
           echo "--- 编译后环境时间: $(LD_PRELOAD=$PRELOAD_LIBS date) ---"
@@ -718,6 +764,7 @@ jobs:
           echo "LZ4: ${{ github.event.inputs.lz4_enable }}" >> ./ak3.log
           echo "LZ4KD: ${{ github.event.inputs.lz4kd_enable }}" >> ./ak3.log
           echo "IPset: ${{ github.event.inputs.better_net }}" >> ./ak3.log
+          echo "Droidspaces: ${{ github.event.inputs.droidspaces_enable }}" >> ./ak3.log
           echo "BBR&Brutal: ${{ github.event.inputs.bbr_enable }}" >> ./ak3.log
           echo "ADIOS: ${{ github.event.inputs.adios_enable }}" >> ./ak3.log
           echo "Re-Kernel: ${{ github.event.inputs.rekernel_enable }}" >> ./ak3.log
@@ -803,6 +850,7 @@ jobs:
             - LZ4支持：${{ github.event.inputs.lz4_enable }}
             - LZ4KD支持：${{ github.event.inputs.lz4kd_enable }}
             - 网络功能增强：${{ github.event.inputs.better_net }}
+            - Droidspaces支持：${{ github.event.inputs.droidspaces_enable }}（Host/None，含 optional F2FS overlay2 修复）
             - BBR/Brutal 等拥塞控制算法支持：${{ github.event.inputs.bbr_enable }}
             - ADIOS IO调度器支持：${{ github.event.inputs.adios_enable }}
             - Re-Kernel支持：${{ github.event.inputs.rekernel_enable }}
