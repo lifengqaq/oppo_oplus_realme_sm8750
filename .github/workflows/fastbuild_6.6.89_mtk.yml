@@ -488,84 +488,39 @@ jobs:
           sed -i 's/${scm_version}//' ./common/scripts/setlocalversion
           echo "CONFIG_LOCALVERSION_AUTO=n" >> ./common/arch/arm64/configs/gki_defconfig
 
-      - name: 应用 Droidspaces 补丁并添加配置
-        if: inputs.droidspaces_enable
-        run: |
-          cd kernel_workspace
-          rm -rf droidspaces-oss
-          git clone --depth=1 https://github.com/ravindu644/Droidspaces-OSS.git droidspaces-oss
+      name: 注入DroidSpaces内核配置
+run: |
+    cd kernel_workspace/common
+    # cd kernel_workspace/common/drivers/kernelsu
+    wget https://raw.githubusercontent.com/ravindu644/Droidspaces-OSS/refs/heads/main/Documentation/resources/kernel-patches/GKI/01.6.1%2B_disable_crc_checks_for_lkms.patch
+    wget https://raw.githubusercontent.com/ravindu644/Droidspaces-OSS/refs/heads/main/Documentation/resources/kernel-patches/GKI/02.fix_restore%20cgroup%20file%20prefix%20handling.patch
+    wget https://raw.githubusercontent.com/ravindu644/Droidspaces-OSS/refs/heads/main/Documentation/resources/kernel-patches/GKI/03.5.15%2B_use_android_abi_padding_for_posix_mqueue.patch
+    wget https://raw.githubusercontent.com/ravindu644/Droidspaces-OSS/refs/heads/main/Documentation/resources/kernel-patches/GKI/04.use_android_abi_padding_for_sysvipc_task_struct.patch
+    patch -p1 -N -F 3 < '01.6.1+_disable_crc_checks_for_lkms.patch'
+    patch -p1 -N -F 3 < '02.fix_restore cgroup file prefix handling .patch'
+    patch -p1 -N -F 3 < '03.5.15+_use_android_abi_padding_for_posix_mqueue.patch'
+    patch -p1 -N -F 3 < '04.use_android_abi_padding_for_sysvipc_task_struct.patch'
+    cd ../
+    # echo "CONFIG_EXPERT=y" >> ./common/arch/arm64/configs/gki_defconfig
+    # 修复 [X] PID namespace 和 [X] IPC namespace
+    echo "CONFIG_SYSCTL=y" >> ./common/arch/arm64/configs/gki_defconfig
+    echo "CONFIG_SYSVIPC=y" >> ./common/arch/arm64/configs/gki_defconfig
+    echo "CONFIG_POSIX_MQUEUE=y" >> ./common/arch/arm64/configs/gki_defconfig
 
-          cd common
-          GKI_PATCH_DIR="../droidspaces-oss/Documentation/resources/kernel-patches/GKI"
-          OPT_PATCH_DIR="../droidspaces-oss/Documentation/resources/kernel-patches/optional"
+    echo "CONFIG_NAMESPACES=y" >> ./common/arch/arm64/configs/gki_defconfig
+    echo "CONFIG_PID_NS=y" >> ./common/arch/arm64/configs/gki_defconfig
+    echo "CONFIG_IPC_NS=y" >> ./common/arch/arm64/configs/gki_defconfig
+    echo "CONFIG_UTS_NS=y" >> ./common/arch/arm64/configs/gki_defconfig
+    echo "CONFIG_USER_NS=y" >> ./common/arch/arm64/configs/gki_defconfig
+    # 修复 [X] devtmpfs support
+    echo "CONFIG_DEVTMPFS=y" >> ./common/arch/arm64/configs/gki_defconfig
+    echo "CONFIG_DEVTMPFS_MOUNT=y" >> ./common/arch/arm64/configs/gki_defconfig
 
-          echo "正在应用 Droidspaces 4 个 GKI 必需补丁..."
-          patch -p1 < "$GKI_PATCH_DIR/01.6.1+_disable_crc_checks_for_lkms.patch"
-          patch -p1 < "$GKI_PATCH_DIR/02.fix_restore cgroup file prefix handling .patch"
-          patch -p1 < "$GKI_PATCH_DIR/03.5.15+_use_android_abi_padding_for_posix_mqueue.patch"
-          patch -p1 < "$GKI_PATCH_DIR/04.use_android_abi_padding_for_sysvipc_task_struct.patch"
-
-          echo "正在应用 Droidspaces optional 补丁: fix-docker-overlay2-on-f2fs.patch"
-          patch -p1 < "$OPT_PATCH_DIR/fix-docker-overlay2-on-f2fs.patch"
-
-          cd ..
-          DEFCONFIG=./common/arch/arm64/configs/gki_defconfig
-
-          set_y() {
-            local key="$1"
-            if grep -q "^# ${key} is not set$" "$DEFCONFIG"; then
-              sed -i "s/^# ${key} is not set$/${key}=y/" "$DEFCONFIG"
-            elif grep -q "^${key}=.*" "$DEFCONFIG"; then
-              sed -i "s/^${key}=.*/${key}=y/" "$DEFCONFIG"
-            else
-              echo "${key}=y" >> "$DEFCONFIG"
-            fi
-          }
-
-          echo "正在添加 Droidspaces 所需内核配置（按官方当前 main 分支文档）..."
-
-          # Required core configs
-          set_y CONFIG_SYSCTL
-          set_y CONFIG_SYSVIPC
-          set_y CONFIG_POSIX_MQUEUE
-
-          set_y CONFIG_NAMESPACES
-          set_y CONFIG_PID_NS
-          set_y CONFIG_UTS_NS
-          set_y CONFIG_IPC_NS
-          set_y CONFIG_USER_NS
-
-          set_y CONFIG_SECCOMP
-          set_y CONFIG_SECCOMP_FILTER
-
-          set_y CONFIG_CGROUPS
-          set_y CONFIG_CGROUP_DEVICE
-          set_y CONFIG_CGROUP_PIDS
-          set_y CONFIG_MEMCG
-          set_y CONFIG_CGROUP_SCHED
-          set_y CONFIG_FAIR_GROUP_SCHED
-          set_y CONFIG_CGROUP_FREEZER
-          set_y CONFIG_CGROUP_NET_PRIO
-
-          set_y CONFIG_DEVTMPFS
-          set_y CONFIG_DEVTMPFS_MOUNT
-          set_y CONFIG_OVERLAY_FS
-
-          # Optional hw-access related support from official docs
-          set_y CONFIG_FW_LOADER
-          set_y CONFIG_FW_LOADER_USER_HELPER
-          set_y CONFIG_FW_LOADER_COMPRESS
-
-          # Host/None only: None 模式关键是 NET_NS
-          set_y CONFIG_NET_NS
-
-          # 已有则保持；没有则补齐，避免将来上游 defconfig 变动
-          set_y CONFIG_VETH
-          set_y CONFIG_BRIDGE
-
-          echo "Droidspaces 配置添加完成"
-          echo "当前 defconfig 关键项如下："
-          grep -E 'CONFIG_(SYSCTL|SYSVIPC|POSIX_MQUEUE|NAMESPACES|PID_NS|UTS_NS|IPC_NS|USER_NS|SECCOMP|SECCOMP_FILTER|CGROUPS|CGROUP_DEVICE|CGROUP_PIDS|MEMCG|CGROUP_SCHED|FAIR_GROUP_SCHED|CGROUP_FREEZER|CGROUP_NET_PRIO|DEVTMPFS|OVERLAY_FS|FW_LOADER|FW_LOADER_USER_HELPER|FW_LOADER_COMPRESS|NET_NS|VETH|BRIDGE)=' "$DEFCONFIG" || true
+    # 修复 cgroup devices support
+    echo "CONFIG_CGROUPS=y" >> ./common/arch/arm64/configs/gki_defconfig
+    echo "CONFIG_CGROUP_DEVICE=y" >> ./common/arch/arm64/configs/gki_defconfig
+    echo "CONFIG_CGROUP_PIDS=y" >> ./common/arch/arm64/configs/gki_defconfig
+    echo "CONFIG_MEMCG=y" >> ./common/arch/arm64/configs/gki_defconfig
 
       - name: 构建内核
         run: |
