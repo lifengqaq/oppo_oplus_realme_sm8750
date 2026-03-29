@@ -461,7 +461,7 @@ jobs:
       - name: 启用内核级基带保护
         if: inputs.baseband_guard
         run: |
-          echo "正在启用启用内核级基带保护支持…"
+          echo "正在启用内核级基带保护支持…"
           cd kernel_workspace
           echo "CONFIG_BBG=y" >> ./common/arch/arm64/configs/gki_defconfig
           cd ./common
@@ -477,7 +477,7 @@ jobs:
             for f in ./common/scripts/setlocalversion; do
               sed -i "\$s|echo \"\\\$res\"|echo \"-${{ github.event.inputs.kernel_suffix }}\"|" "$f"
             done
-            sudo sed -i 's/-4k/-${{ github.event.inputs.KERNEL_SUFFIX }}/g' ./common/arch/arm64/configs/gki_defconfig
+            sudo sed -i 's/-4k/-${{ github.event.inputs.kernel_suffix }}/g' ./common/arch/arm64/configs/gki_defconfig
           else
             echo "当前内核版本后缀：${{ env.KERNEL_NAME }}"
             for f in ./common/scripts/setlocalversion; do
@@ -488,39 +488,36 @@ jobs:
           sed -i 's/${scm_version}//' ./common/scripts/setlocalversion
           echo "CONFIG_LOCALVERSION_AUTO=n" >> ./common/arch/arm64/configs/gki_defconfig
 
-      name: 注入DroidSpaces内核配置
-run: |
-    cd kernel_workspace/common
-    # cd kernel_workspace/common/drivers/kernelsu
-    wget https://raw.githubusercontent.com/ravindu644/Droidspaces-OSS/refs/heads/main/Documentation/resources/kernel-patches/GKI/01.6.1%2B_disable_crc_checks_for_lkms.patch
-    wget https://raw.githubusercontent.com/ravindu644/Droidspaces-OSS/refs/heads/main/Documentation/resources/kernel-patches/GKI/02.fix_restore%20cgroup%20file%20prefix%20handling.patch
-    wget https://raw.githubusercontent.com/ravindu644/Droidspaces-OSS/refs/heads/main/Documentation/resources/kernel-patches/GKI/03.5.15%2B_use_android_abi_padding_for_posix_mqueue.patch
-    wget https://raw.githubusercontent.com/ravindu644/Droidspaces-OSS/refs/heads/main/Documentation/resources/kernel-patches/GKI/04.use_android_abi_padding_for_sysvipc_task_struct.patch
-    patch -p1 -N -F 3 < '01.6.1+_disable_crc_checks_for_lkms.patch'
-    patch -p1 -N -F 3 < '02.fix_restore cgroup file prefix handling .patch'
-    patch -p1 -N -F 3 < '03.5.15+_use_android_abi_padding_for_posix_mqueue.patch'
-    patch -p1 -N -F 3 < '04.use_android_abi_padding_for_sysvipc_task_struct.patch'
-    cd ../
-    # echo "CONFIG_EXPERT=y" >> ./common/arch/arm64/configs/gki_defconfig
-    # 修复 [X] PID namespace 和 [X] IPC namespace
-    echo "CONFIG_SYSCTL=y" >> ./common/arch/arm64/configs/gki_defconfig
-    echo "CONFIG_SYSVIPC=y" >> ./common/arch/arm64/configs/gki_defconfig
-    echo "CONFIG_POSIX_MQUEUE=y" >> ./common/arch/arm64/configs/gki_defconfig
-
-    echo "CONFIG_NAMESPACES=y" >> ./common/arch/arm64/configs/gki_defconfig
-    echo "CONFIG_PID_NS=y" >> ./common/arch/arm64/configs/gki_defconfig
-    echo "CONFIG_IPC_NS=y" >> ./common/arch/arm64/configs/gki_defconfig
-    echo "CONFIG_UTS_NS=y" >> ./common/arch/arm64/configs/gki_defconfig
-    echo "CONFIG_USER_NS=y" >> ./common/arch/arm64/configs/gki_defconfig
-    # 修复 [X] devtmpfs support
-    echo "CONFIG_DEVTMPFS=y" >> ./common/arch/arm64/configs/gki_defconfig
-    echo "CONFIG_DEVTMPFS_MOUNT=y" >> ./common/arch/arm64/configs/gki_defconfig
-
-    # 修复 cgroup devices support
-    echo "CONFIG_CGROUPS=y" >> ./common/arch/arm64/configs/gki_defconfig
-    echo "CONFIG_CGROUP_DEVICE=y" >> ./common/arch/arm64/configs/gki_defconfig
-    echo "CONFIG_CGROUP_PIDS=y" >> ./common/arch/arm64/configs/gki_defconfig
-    echo "CONFIG_MEMCG=y" >> ./common/arch/arm64/configs/gki_defconfig
+      - name: 注入DroidSpaces内核配置
+        if: inputs.droidspaces_enable
+        run: |
+          cd kernel_workspace/common
+          wget https://raw.githubusercontent.com/ravindu644/Droidspaces-OSS/refs/heads/main/Documentation/resources/kernel-patches/GKI/01.6.1%2B_disable_crc_checks_for_lkms.patch
+          wget https://raw.githubusercontent.com/ravindu644/Droidspaces-OSS/refs/heads/main/Documentation/resources/kernel-patches/GKI/02.fix_restore%20cgroup%20file%20prefix%20handling.patch
+          wget https://raw.githubusercontent.com/ravindu644/Droidspaces-OSS/refs/heads/main/Documentation/resources/kernel-patches/GKI/03.5.15%2B_use_android_abi_padding_for_posix_mqueue.patch
+          wget https://raw.githubusercontent.com/ravindu644/Droidspaces-OSS/refs/heads/main/Documentation/resources/kernel-patches/GKI/04.use_android_abi_padding_for_sysvipc_task_struct.patch
+          patch -p1 -N -F 3 < '01.6.1+_disable_crc_checks_for_lkms.patch'
+          patch -p1 -N -F 3 < '02.fix_restore cgroup file prefix handling .patch'
+          patch -p1 -N -F 3 < '03.5.15+_use_android_abi_padding_for_posix_mqueue.patch'
+          patch -p1 -N -F 3 < '04.use_android_abi_padding_for_sysvipc_task_struct.patch'
+          cd ../
+          # 修复 [X] PID namespace 和 [X] IPC namespace
+          echo "CONFIG_SYSCTL=y" >> ./common/arch/arm64/configs/gki_defconfig
+          echo "CONFIG_SYSVIPC=y" >> ./common/arch/arm64/configs/gki_defconfig
+          echo "CONFIG_POSIX_MQUEUE=y" >> ./common/arch/arm64/configs/gki_defconfig
+          echo "CONFIG_NAMESPACES=y" >> ./common/arch/arm64/configs/gki_defconfig
+          echo "CONFIG_PID_NS=y" >> ./common/arch/arm64/configs/gki_defconfig
+          echo "CONFIG_IPC_NS=y" >> ./common/arch/arm64/configs/gki_defconfig
+          echo "CONFIG_UTS_NS=y" >> ./common/arch/arm64/configs/gki_defconfig
+          echo "CONFIG_USER_NS=y" >> ./common/arch/arm64/configs/gki_defconfig
+          # 修复 [X] devtmpfs support
+          echo "CONFIG_DEVTMPFS=y" >> ./common/arch/arm64/configs/gki_defconfig
+          echo "CONFIG_DEVTMPFS_MOUNT=y" >> ./common/arch/arm64/configs/gki_defconfig
+          # 修复 cgroup devices support
+          echo "CONFIG_CGROUPS=y" >> ./common/arch/arm64/configs/gki_defconfig
+          echo "CONFIG_CGROUP_DEVICE=y" >> ./common/arch/arm64/configs/gki_defconfig
+          echo "CONFIG_CGROUP_PIDS=y" >> ./common/arch/arm64/configs/gki_defconfig
+          echo "CONFIG_MEMCG=y" >> ./common/arch/arm64/configs/gki_defconfig
 
       - name: 构建内核
         run: |
