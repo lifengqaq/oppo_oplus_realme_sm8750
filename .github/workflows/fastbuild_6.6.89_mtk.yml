@@ -61,7 +61,7 @@ on:
         type: boolean
         default: 'false'
       droidspaces_enable:
-        description: '是否启用 Droidspaces 支持(Host/None，不含 UFW/Fail2ban；含 optional F2FS overlay2 补丁)'
+        description: '是否启用 Droidspaces'
         required: true
         type: boolean
         default: 'false'
