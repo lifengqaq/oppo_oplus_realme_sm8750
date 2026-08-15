@@ -1,0 +1,135 @@
+name: MT6991 6.6.118 Re-Kernel Build
+
+on:
+  workflow_dispatch:
+    inputs:
+      kernel_ref:
+        description: "Kernel fork branch or tag"
+        required: true
+        default: "port/mt6991-6.6.118-rekernel"
+        type: string
+
+permissions:
+  contents: read
+
+env:
+  KERNEL_REPOSITORY: lifengqaq/android_kernel_oneplus_mt6991
+  TOOLCHAIN_URL: https://github.com/cctv18/oneplus_sm8650_toolchain/releases/download/LLVM-Clang18-r510928/clang-r510928.zip
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 180
+    env:
+      KERNEL_REF: ${{ inputs.kernel_ref }}
+    steps:
+      - name: Install build dependencies
+        shell: bash
+        run: |
+          set -euo pipefail
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            bc bison build-essential ccache cpio curl dwarves flex \
+            gcc-aarch64-linux-gnu gcc-arm-linux-gnueabihf \
+            libelf-dev libssl-dev python3 python-is-python3 rsync \
+            unzip xz-utils zip
+
+      - name: Fetch kernel source and Clang 18
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p "$GITHUB_WORKSPACE/kernel_workspace"
+          git clone --depth=1 --branch "$KERNEL_REF" \
+            "https://github.com/${KERNEL_REPOSITORY}.git" \
+            "$GITHUB_WORKSPACE/kernel_workspace/common"
+          git -C "$GITHUB_WORKSPACE/kernel_workspace/common" rev-parse HEAD \
+            | tee "$GITHUB_WORKSPACE/kernel_workspace/kernel-commit.txt"
+
+          cd "$GITHUB_WORKSPACE/kernel_workspace"
+          curl -fL --retry 3 --retry-delay 5 "$TOOLCHAIN_URL" -o clang-r510928.zip
+          unzip -q clang-r510928.zip -d clang18
+          clang_path="$(find "$PWD/clang18" -type f -path '*/bin/clang' -print -quit)"
+          test -n "$clang_path"
+          printf 'CLANG_BIN=%s\n' "$(dirname "$clang_path")" >> "$GITHUB_ENV"
+
+      - name: Configure GKI with Re-Kernel enabled
+        shell: bash
+        run: |
+          set -euo pipefail
+          set -o pipefail
+          export PATH="$CLANG_BIN:$PATH"
+          export CCACHE_DIR="$GITHUB_WORKSPACE/.ccache"
+          export CCACHE_COMPILERCHECK=content
+          export CCACHE_BASEDIR="$GITHUB_WORKSPACE"
+          export CCACHE_NOHASHDIR=true
+          mkdir -p "$CCACHE_DIR"
+
+          cd "$GITHUB_WORKSPACE/kernel_workspace/common"
+          make_args=(
+            LLVM=1
+            ARCH=arm64
+            CROSS_COMPILE=aarch64-linux-gnu-
+            CROSS_COMPILE_ARM32=arm-linux-gnueabihf-
+            CC="ccache clang"
+            LD=ld.lld
+            HOSTCC=clang
+            HOSTLD=ld.lld
+            O=out
+            "KCFLAGS+=-Wno-error"
+          )
+          make -j"$(nproc)" "${make_args[@]}" gki_defconfig 2>&1 | tee build.log
+          scripts/config --file out/.config --enable REKERNEL
+          make -j"$(nproc)" "${make_args[@]}" olddefconfig 2>&1 | tee -a build.log
+          grep -qx 'CONFIG_REKERNEL=y' out/.config
+          cp out/.config rekernel.config
+
+      - name: Build Image
+        shell: bash
+        run: |
+          set -euo pipefail
+          set -o pipefail
+          export PATH="$CLANG_BIN:$PATH"
+          export CCACHE_DIR="$GITHUB_WORKSPACE/.ccache"
+          export CCACHE_COMPILERCHECK=content
+          export CCACHE_BASEDIR="$GITHUB_WORKSPACE"
+          export CCACHE_NOHASHDIR=true
+
+          cd "$GITHUB_WORKSPACE/kernel_workspace/common"
+          make_args=(
+            LLVM=1
+            ARCH=arm64
+            CROSS_COMPILE=aarch64-linux-gnu-
+            CROSS_COMPILE_ARM32=arm-linux-gnueabihf-
+            CC="ccache clang"
+            LD=ld.lld
+            HOSTCC=clang
+            HOSTLD=ld.lld
+            O=out
+            "KCFLAGS+=-Wno-error"
+          )
+          make -j"$(nproc)" "${make_args[@]}" Image 2>&1 | tee -a build.log
+          test -s out/arch/arm64/boot/Image
+          ccache --show-stats
+
+      - name: Upload build log
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: mt6991-6.6.118-rekernel-log-${{ github.run_number }}
+          path: kernel_workspace/common/build.log
+          if-no-files-found: warn
+          retention-days: 14
+
+      - name: Upload Image and build metadata
+        if: success()
+        uses: actions/upload-artifact@v4
+        with:
+          name: mt6991-6.6.118-rekernel-${{ github.run_number }}
+          path: |
+            kernel_workspace/common/out/arch/arm64/boot/Image
+            kernel_workspace/common/out/System.map
+            kernel_workspace/common/out/Module.symvers
+            kernel_workspace/common/rekernel.config
+            kernel_workspace/kernel-commit.txt
+          if-no-files-found: error
+          retention-days: 14
