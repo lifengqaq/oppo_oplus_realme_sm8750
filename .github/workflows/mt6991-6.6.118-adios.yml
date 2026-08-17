@@ -1,0 +1,58 @@
+name: MT6991 6.6.118 ADIOS Build
+
+on:
+  workflow_dispatch:
+    inputs:
+      kernel_ref:
+        required: true
+        default: "port/mt6991-6.6.118-adios"
+        type: string
+
+permissions:
+  contents: read
+
+env:
+  KERNEL_REPOSITORY: lifengqaq/android_kernel_oneplus_mt6991
+  TOOLCHAIN_URL: https://github.com/cctv18/oneplus_sm8650_toolchain/releases/download/LLVM-Clang18-r510928/clang-r510928.zip
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 180
+    steps:
+      - name: Install dependencies
+        run: |
+          set -euo pipefail
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends bc bison build-essential ccache cpio curl dwarves flex gcc-aarch64-linux-gnu gcc-arm-linux-gnueabihf libelf-dev libssl-dev python3 python-is-python3 rsync unzip xz-utils zip
+
+      - name: Build ADIOS kernel
+        env:
+          KERNEL_REF: ${{ inputs.kernel_ref }}
+        run: |
+          set -euo pipefail
+          mkdir -p kernel_workspace
+          git clone --depth=1 --branch "$KERNEL_REF" "https://github.com/${KERNEL_REPOSITORY}.git" kernel_workspace/common
+          cd kernel_workspace
+          curl -fL --retry 3 --retry-delay 5 "$TOOLCHAIN_URL" -o clang.zip
+          unzip -q clang.zip -d clang18
+          clang_path="$(find "$PWD/clang18" -type f -path '*/bin/clang' -print -quit)"
+          test -n "$clang_path"
+          export PATH="$(dirname "$clang_path"):$PATH"
+          cd common
+          make_args=(LLVM=1 ARCH=arm64 CROSS_COMPILE=aarch64-linux-gnu- CROSS_COMPILE_ARM32=arm-linux-gnueabihf- CC="ccache clang" LD=ld.lld HOSTCC=clang HOSTLD=ld.lld O=out "KCFLAGS+=-Wno-error")
+          make -j"$(nproc)" "${make_args[@]}" gki_defconfig 2>&1 | tee build.log
+          grep -qx 'CONFIG_MQ_IOSCHED_ADIOS=y' out/.config
+          grep -qx 'CONFIG_MQ_IOSCHED_DEFAULT_ADIOS=y' out/.config
+          make -j"$(nproc)" "${make_args[@]}" Image 2>&1 | tee -a build.log
+          test -s out/arch/arm64/boot/Image
+          test -s out/block/adios.o
+
+      - name: Upload build log
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: mt6991-6.6.118-adios-${{ github.run_number }}
+          path: kernel_workspace/common/build.log
+          if-no-files-found: warn
+          retention-days: 14
