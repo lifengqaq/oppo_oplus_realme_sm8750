@@ -183,6 +183,7 @@ jobs:
           name: mt6991-6.6.118-fengchi-${{ github.run_number }}
           path: |
             kernel_workspace/common/out/arch/arm64/boot/Image
+            kernel_workspace/common/out/vmlinux
             kernel_workspace/common/out/System.map
             kernel_workspace/common/out/Module.symvers
             kernel_workspace/common/fengchi.config
